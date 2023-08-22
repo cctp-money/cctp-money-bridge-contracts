@@ -2,19 +2,17 @@
 
 pragma solidity ^0.8.19;
 
-import "../lib/TokenMessenger.sol";
+import "./interfaces/ITokenMessenger.sol";
+import "./interfaces/ITokenMessengerWithMetadata.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
- * @title 
- * @author 
- * @notice 
- * 
  * This contract collects fees and wraps 6 external contract functions.
  * 
  * depositForBurn - a normal burn
  * depositForBurnWithCaller - only the destination caller address can mint
  * 
- * We can also specify IBC forwarding metadata:
+ * We can also specify IBC forwarding metadata for minting on Noble chain or IBC connected chains:
  * 
  * depositForBurnWithMetadata - explicit parameters
  * rawDepositForBurnWithMetadata - paramaters are packed into a byte array
@@ -29,8 +27,11 @@ contract Deposit {
     // the address where fees are sent
     address payable public collector;
 
-    // the domain id the contract is deployed on
-    bytes32 public domain;
+    // the domain id this contract is deployed on
+    bytes32 public immutable domain;
+
+    // Noble domain id
+    bytes32 public immutable nobleDomainId;
 
     struct Fee {
         // percentage fee in bips
@@ -43,30 +44,27 @@ contract Deposit {
     mapping(uint32 => Fee) public feeMap;
 
     // cctp token messenger contract
-    TokenMessenger public tokenMessenger;
+    ITokenMessenger public tokenMessenger;
 
     // ibc forwarding wrapper contract
-    TokenMessengerWithMetadata public tokenMessengerWithMetadata;
+    ITokenMessengerWithMetadata public tokenMessengerWithMetadata;
 
+    // TODO the event should have everything we need to mint on destination chain
     event Burn(address sender, uint32 source, uint32 dest, address indexed token, uint256 amountBurned, uint256 fee);
 
     constructor(
         address _tokenMessenger, 
         address _tokenMessengerWithMetadata, 
-        address _collector, 
-        uint256 _percFee, 
-        uint256 _flatFee, 
+        address _collector,
         bytes32 _domain) {
 
         require(_tokenMessenger != address(0), "TokenMessenger not set");
-        tokenMessenger = TokenMessenger(_tokenMessenger);
+        tokenMessenger = ITokenMessenger(_tokenMessenger);
 
         require(_tokenMessengerWithMetadata != address(0), "TokenMessengerWithMetadata not set");
-        tokenMessengerWithMetadata = TokenMessengerWithMetadata(_tokenMessengerWithMetadata);
+        tokenMessengerWithMetadata = ITokenMessengerWithMetadata(_tokenMessengerWithMetadata);
 
         collector = _collector;
-        percFee = _percFee;
-        flatFee = _flatFee;
         domain = _domain;
 
         owner = msg.sender;
@@ -88,10 +86,10 @@ contract Deposit {
         bytes32 mintRecipient,
         address burnToken
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, destinationDomain);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
 
-        TokenMessenger.depositForBurn(amount - fee, destinationDomain, mintRecipient, burnToken);
+        ITokenMessenger.depositForBurn(amount - fee, destinationDomain, mintRecipient, burnToken);
         emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
     }
 
@@ -114,10 +112,10 @@ contract Deposit {
         address burnToken,
         bytes32 destinationCaller
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, destinationDomain);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
 
-        TokenMessenger.depositForBurnWithCaller(
+        ITokenMessenger.depositForBurnWithCaller(
             amount - fee, 
             destinationDomain, 
             mintRecipient, 
@@ -129,6 +127,8 @@ contract Deposit {
     }
 
     /**
+     * Only for depositing to an IBC connected chain via Noble
+     * 
      * Burns tokens on the source chain
      * Includes IBC forwarding instructions
      * @param channel  asdf
@@ -146,10 +146,10 @@ contract Deposit {
         address burnToken,
         bytes calldata memo
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        tokenMessengerWithMetadata.depositForBurn(
+        ITokenMessengerWithMetadata.depositForBurn(
             channel,
             destinationRecipient,
             amount - fee,
@@ -158,10 +158,12 @@ contract Deposit {
             memo
         );
 
-        emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
+        emit Burn(msg.sender, domain, nobleDomainId, burnToken, amount - fee, fee);
     }
 
     /**
+     * Only for depositing to an IBC connected chain via Noble
+     * 
      * Burns tokens on the source chain
      * Includes IBC forwarding instructions
      */
@@ -171,20 +173,22 @@ contract Deposit {
         address burnToken,
         bytes memory metadata
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        tokenMessengerWithMetadata.rawDepositForBurn(
+        ITokenMessengerWithMetadata.rawDepositForBurn(
             amount - fee,
             mintRecipient,
             burnToken,
             metadata
         );
 
-        emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
+        emit Burn(msg.sender, domain, nobleDomainId, burnToken, amount - fee, fee);
     }
 
     /**
+     * Only for depositing to an IBC connected chain via Noble
+     * 
      * Burns tokens on the source chain
      * Specifies an address which can mint
      * Includes IBC forwarding instructions
@@ -206,10 +210,10 @@ contract Deposit {
         bytes32 destinationCaller,
         bytes calldata memo
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        tokenMessengerWithMetadata.depositForBurnWithCaller(
+        ITokenMessengerWithMetadata.depositForBurnWithCaller(
             channel,
             destinationRecipient,
             amount - fee,
@@ -219,10 +223,12 @@ contract Deposit {
             memo
         );
 
-        emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
+        emit Burn(msg.sender, domain, nobleDomainId, burnToken, amount - fee, fee);
     }
 
-/**
+   /**
+    * Only for depositing to an IBC connected chain via Noble
+    * 
     * Burns tokens on the source chain
     * Specifies an address which can mint
     * Includes IBC forwarding instructions
@@ -240,10 +246,10 @@ contract Deposit {
         bytes32 destinationCaller,
         bytes memory metadata
     ) external {
-        fee = calculateFee(amount, destinationDomain);
+        Fee fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        tokenMessengerWithMetadata.rawDepositForBurnWithCaller(
+        ITokenMessengerWithMetadata.rawDepositForBurnWithCaller(
             amount - fee,
             mintRecipient,
             burnToken,
@@ -251,11 +257,11 @@ contract Deposit {
             metadata
         );
 
-        emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
+        emit Burn(msg.sender, domain, nobleDomainId, burnToken, amount - fee, fee);
     }
 
     function calculateFee(uint256 amount, bytes32 destinationDomain) private returns (uint256) {
-        fee = feeMap[destinationDomain];
+        Fee fee = feeMap[destinationDomain];
         return (amount * fee.percFee) + fee.flatFee;
     }
 
