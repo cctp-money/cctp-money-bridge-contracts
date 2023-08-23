@@ -2,8 +2,10 @@
 
 pragma solidity 0.7.6;
 
-import "evm-cctp-contracts/src/TokenMessenger.sol";
+import "./interfaces/ITokenMessenger.sol";
 import "./interfaces/ITokenMessengerWithMetadata.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "evm-cctp-contracts/src/interfaces/IMintBurnToken.sol";
 
 /**
  * This contract collects fees and wraps 6 external contract functions.
@@ -45,13 +47,13 @@ contract Deposit {
     mapping(uint32 => Fee) public feeMap;
 
     // cctp token messenger contract
-    TokenMessenger public tokenMessenger;
+    ITokenMessenger public tokenMessenger;
 
     // ibc forwarding wrapper contract
     ITokenMessengerWithMetadata public tokenMessengerWithMetadata;
 
     // TODO the event should have everything we need to mint on destination chain
-    event Burn(address sender, uint32 source, uint32 dest, address indexed token, uint256 amountBurned, uint256 fee);
+    event Burn(address sender, uint32 source, uint32 dest, address indexed token, uint256 indexed amountBurned, uint256 indexed fee);
 
     // TODO whitelist of tokens that can be burnt?
 
@@ -64,7 +66,7 @@ contract Deposit {
         uint32 _domain) {
 
         require(_tokenMessenger != address(0), "TokenMessenger not set");
-        tokenMessenger = TokenMessenger(_tokenMessenger);
+        tokenMessenger = ITokenMessenger(_tokenMessenger);
 
         require(_tokenMessengerWithMetadata != address(0), "TokenMessengerWithMetadata not set");
         tokenMessengerWithMetadata = ITokenMessengerWithMetadata(_tokenMessengerWithMetadata);
@@ -91,8 +93,14 @@ contract Deposit {
         bytes32 mintRecipient,
         address burnToken
     ) external {
+
+        IMintBurnToken token = IMintBurnToken(burnToken);
+        token.transferFrom(msg.sender, address(this), amount);
+        token.approve(address(tokenMessenger), amount);
+
         uint256 fee = calculateFee(amount, destinationDomain);
-        IERC20(burnToken).transferFrom(msg.sender, collector, fee);
+
+        token.transferFrom(address(this), collector, fee);
 
         tokenMessenger.depositForBurn(amount - fee, destinationDomain, mintRecipient, burnToken);
         emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
