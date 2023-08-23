@@ -1,10 +1,9 @@
 //SPDX-License-Identifier: UNLICENSED
 
-pragma solidity ^0.8.19;
+pragma solidity 0.7.6;
 
-import "./interfaces/ITokenMessenger.sol";
+import "evm-cctp-contracts/src/TokenMessenger.sol";
 import "./interfaces/ITokenMessengerWithMetadata.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
  * This contract collects fees and wraps 6 external contract functions.
@@ -12,7 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * depositForBurn - a normal burn
  * depositForBurnWithCaller - only the destination caller address can mint
  * 
- * We can also specify IBC forwarding metadata for minting on Noble chain or IBC connected chains:
+ * We can also specify metadata for minting on Noble and forwarding to an IBC connected chain:
  * 
  * depositForBurnWithMetadata - explicit parameters
  * rawDepositForBurnWithMetadata - paramaters are packed into a byte array
@@ -28,23 +27,25 @@ contract Deposit {
     address payable public collector;
 
     // the domain id this contract is deployed on
-    bytes32 public immutable domain;
+    uint32 public immutable domain;
 
     // Noble domain id
-    bytes32 public immutable nobleDomainId;
+    uint32 public immutable nobleDomainId = 4;
 
     struct Fee {
         // percentage fee in bips
         uint256 percFee;
-        // flat fee in uusdc (1 usdc = 10^6 uusdc)
+        // flat fee in uusdc (1 uusdc = 10^-6 usdc)
         uint256 flatFee;
+        // needed for null check
+        bool isInitialized;
     }
 
     // mapping of destination domain -> fee
     mapping(uint32 => Fee) public feeMap;
 
     // cctp token messenger contract
-    ITokenMessenger public tokenMessenger;
+    TokenMessenger public tokenMessenger;
 
     // ibc forwarding wrapper contract
     ITokenMessengerWithMetadata public tokenMessengerWithMetadata;
@@ -52,14 +53,18 @@ contract Deposit {
     // TODO the event should have everything we need to mint on destination chain
     event Burn(address sender, uint32 source, uint32 dest, address indexed token, uint256 amountBurned, uint256 fee);
 
+    // TODO whitelist of tokens that can be burnt?
+
+    event Debug(string msg);
+    
     constructor(
         address _tokenMessenger, 
         address _tokenMessengerWithMetadata, 
-        address _collector,
-        bytes32 _domain) {
+        address payable _collector,
+        uint32 _domain) {
 
         require(_tokenMessenger != address(0), "TokenMessenger not set");
-        tokenMessenger = ITokenMessenger(_tokenMessenger);
+        tokenMessenger = TokenMessenger(_tokenMessenger);
 
         require(_tokenMessengerWithMetadata != address(0), "TokenMessengerWithMetadata not set");
         tokenMessengerWithMetadata = ITokenMessengerWithMetadata(_tokenMessengerWithMetadata);
@@ -86,10 +91,10 @@ contract Deposit {
         bytes32 mintRecipient,
         address burnToken
     ) external {
-        Fee fee = calculateFee(amount, destinationDomain);
+        uint256 fee = calculateFee(amount, destinationDomain);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
 
-        ITokenMessenger.depositForBurn(amount - fee, destinationDomain, mintRecipient, burnToken);
+        tokenMessenger.depositForBurn(amount - fee, destinationDomain, mintRecipient, burnToken);
         emit Burn(msg.sender, domain, destinationDomain, burnToken, amount - fee, fee);
     }
 
@@ -112,10 +117,10 @@ contract Deposit {
         address burnToken,
         bytes32 destinationCaller
     ) external {
-        Fee fee = calculateFee(amount, destinationDomain);
+        uint256 fee = calculateFee(amount, destinationDomain);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
 
-        ITokenMessenger.depositForBurnWithCaller(
+        tokenMessenger.depositForBurnWithCaller(
             amount - fee, 
             destinationDomain, 
             mintRecipient, 
@@ -146,10 +151,10 @@ contract Deposit {
         address burnToken,
         bytes calldata memo
     ) external {
-        Fee fee = calculateFee(amount, nobleDomainId);
+        uint256 fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        ITokenMessengerWithMetadata.depositForBurn(
+        tokenMessengerWithMetadata.depositForBurn(
             channel,
             destinationRecipient,
             amount - fee,
@@ -173,10 +178,10 @@ contract Deposit {
         address burnToken,
         bytes memory metadata
     ) external {
-        Fee fee = calculateFee(amount, nobleDomainId);
+        uint256 fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        ITokenMessengerWithMetadata.rawDepositForBurn(
+        tokenMessengerWithMetadata.rawDepositForBurn(
             amount - fee,
             mintRecipient,
             burnToken,
@@ -210,10 +215,10 @@ contract Deposit {
         bytes32 destinationCaller,
         bytes calldata memo
     ) external {
-        Fee fee = calculateFee(amount, nobleDomainId);
+        uint256 fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        ITokenMessengerWithMetadata.depositForBurnWithCaller(
+        tokenMessengerWithMetadata.depositForBurnWithCaller(
             channel,
             destinationRecipient,
             amount - fee,
@@ -246,10 +251,10 @@ contract Deposit {
         bytes32 destinationCaller,
         bytes memory metadata
     ) external {
-        Fee fee = calculateFee(amount, nobleDomainId);
+        uint256 fee = calculateFee(amount, nobleDomainId);
         IERC20(burnToken).transferFrom(msg.sender, collector, fee);
         
-        ITokenMessengerWithMetadata.rawDepositForBurnWithCaller(
+        tokenMessengerWithMetadata.rawDepositForBurnWithCaller(
             amount - fee,
             mintRecipient,
             burnToken,
@@ -260,8 +265,9 @@ contract Deposit {
         emit Burn(msg.sender, domain, nobleDomainId, burnToken, amount - fee, fee);
     }
 
-    function calculateFee(uint256 amount, bytes32 destinationDomain) private returns (uint256) {
-        Fee fee = feeMap[destinationDomain];
+    function calculateFee(uint256 amount, uint32 destinationDomain) private view returns (uint256) {
+        Fee memory fee = feeMap[destinationDomain];
+        require(fee.isInitialized, "Fee not found.");
         return (amount * fee.percFee) + fee.flatFee;
     }
 
@@ -270,13 +276,13 @@ contract Deposit {
         owner = newOwner;
     }
 
-    function updateCollector(address newCollector) external {
+    function updateCollector(address payable newCollector) external {
         require(msg.sender == owner, "Only the owner can update the collector");
         collector = newCollector;
     }
 
-    function updateFee(bytes32 destinationDomain, uint256 percFee, uint256 flatFee) external {
+    function updateFee(uint32 destinationDomain, uint256 percFee, uint256 flatFee) external {
         require(msg.sender == owner, "Only the owner can update fees");
-        feeMap[destinationDomain] = Fee(percFee, flatFee);
+        feeMap[destinationDomain] = Fee(percFee, flatFee, true);
     }
 }
