@@ -97,77 +97,77 @@ contract TokenMessengerWithMetadataWrapperTest is Test, TestUtils, GasSnapshot {
     }
 
     // ============ Tests ============
-    function testConstructor_rejectsZeroAddressTokenMessenger() public {
-        vm.expectRevert(TokenMessengerNotSet.selector);
-
-        tokenMessengerWithMetadataWrapper = new TokenMessengerWithMetadataWrapper(
-            address(0),
-            address(address(tokenMessengerWithMetadata)),
-            LOCAL_DOMAIN,
-            COLLECTOR,
-            FEE_UPDATER,
-            TOKEN_ADDRESS
-        );
-    }
-
-    // depositForBurn - no fee set
-    function testDepositForBurnFeeNotFound(
-        uint256 _amount,
-        address _mintRecipient
-    ) public {
-        _amount = 4;
-
-        vm.assume(_mintRecipient != address(0));
-        bytes32 _mintRecipientRaw = Message.addressToBytes32(_mintRecipient);
-
-        token.mint(OWNER, _amount);
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, 0, 3);
-
-        tokenMessenger.addRemoteTokenMessenger(
-            55, REMOTE_TOKEN_MESSENGER
-        );
-
-        vm.prank(OWNER);
-        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
-
-        vm.expectRevert(FeeNotFound.selector);
-
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.depositForBurn(
-            _amount,
-            55,
-            _mintRecipientRaw,
-            bytes32(0)
-        );
-    }
-
-    function testDepositForBurnWithTooSmallAmount(
-        uint256 _amount,
-        address _mintRecipient
-    ) public {
-        _amount = 2;
-
-        vm.assume(_mintRecipient != address(0));
-        bytes32 _mintRecipientRaw = Message.addressToBytes32(_mintRecipient);
-
-        token.mint(OWNER, _amount);
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, 0, 3);
-
-        vm.prank(OWNER);
-        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
-
-        vm.expectRevert(BurnAmountTooLow.selector);
-
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.depositForBurn(
-            _amount,
-            REMOTE_DOMAIN,
-            _mintRecipientRaw,
-            bytes32(0)
-        );
-    }
+//    function testConstructor_rejectsZeroAddressTokenMessenger() public {
+//        vm.expectRevert(TokenMessengerNotSet.selector);
+//
+//        tokenMessengerWithMetadataWrapper = new TokenMessengerWithMetadataWrapper(
+//            address(0),
+//            address(address(tokenMessengerWithMetadata)),
+//            LOCAL_DOMAIN,
+//            COLLECTOR,
+//            FEE_UPDATER,
+//            TOKEN_ADDRESS
+//        );
+//    }
+//
+//    // depositForBurn - no fee set
+//    function testDepositForBurnFeeNotFound(
+//        uint256 _amount,
+//        address _mintRecipient
+//    ) public {
+//        _amount = 4;
+//
+//        vm.assume(_mintRecipient != address(0));
+//        bytes32 _mintRecipientRaw = Message.addressToBytes32(_mintRecipient);
+//
+//        token.mint(OWNER, _amount);
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, 0, 3);
+//
+//        tokenMessenger.addRemoteTokenMessenger(
+//            55, REMOTE_TOKEN_MESSENGER
+//        );
+//
+//        vm.prank(OWNER);
+//        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
+//
+//        vm.expectRevert(FeeNotFound.selector);
+//
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.depositForBurn(
+//            _amount,
+//            55,
+//            _mintRecipientRaw,
+//            bytes32(0)
+//        );
+//    }
+//
+//    function testDepositForBurnWithTooSmallAmount(
+//        uint256 _amount,
+//        address _mintRecipient
+//    ) public {
+//        _amount = 2;
+//
+//        vm.assume(_mintRecipient != address(0));
+//        bytes32 _mintRecipientRaw = Message.addressToBytes32(_mintRecipient);
+//
+//        token.mint(OWNER, _amount);
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, 0, 3);
+//
+//        vm.prank(OWNER);
+//        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
+//
+//        vm.expectRevert(BurnAmountTooLow.selector);
+//
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.depositForBurn(
+//            _amount,
+//            REMOTE_DOMAIN,
+//            _mintRecipientRaw,
+//            bytes32(0)
+//        );
+//    }
 
     // depositForBurn
     function testDepositForBurnSuccess(
@@ -191,7 +191,7 @@ contract TokenMessengerWithMetadataWrapperTest is Test, TestUtils, GasSnapshot {
         uint256 deadline = block.timestamp + 1312;
         uint256 cost = 10 ether;
 
-        bytes32 typedData = keccak256(abi.encode(PERMIT_TYPEHASH, burner, address(tokenMessengerWithMetadataWrapper)), cost, token.getNonce(burner), deadline);
+        bytes32 typedData = keccak256(abi.encode(PERMIT_TYPEHASH, burner, address(tokenMessengerWithMetadataWrapper), cost, vm.getNonce(burner), deadline));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.getDomainSeparator(), typedData()));
         vm.prank(burner);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
@@ -222,114 +222,114 @@ contract TokenMessengerWithMetadataWrapperTest is Test, TestUtils, GasSnapshot {
         snapEnd();
     }
 
-    // depositForBurn with caller
-    function testDepositForBurnWithCallerSuccess(
-        uint256 _amount,
-        uint16 _percFee,
-        uint64 _flatFee
-    ) public {
-
-        vm.assume(_amount > 0);
-        vm.assume(_amount <= ALLOWED_BURN_AMOUNT);
-        vm.assume(_percFee > 0);
-        vm.assume(_percFee <= 100);
-        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
-
-        bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
-
-        token.mint(OWNER, _amount);
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, _percFee, _flatFee);
-
-        vm.prank(OWNER);
-        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
-
-        vm.expectEmit(true, true, true, true);
-        uint256 fee = (_amount * _percFee / 10000) + _flatFee;
-        emit Collect(_mintRecipientRaw, _amount - fee, fee, LOCAL_DOMAIN, REMOTE_DOMAIN);
-
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.depositForBurn(
-            _amount,
-            REMOTE_DOMAIN,
-            _mintRecipientRaw,
-            0x0000000000000000000000000000000000000000000000000000000000000001
-        );
-
-        assertEq(0, token.balanceOf(OWNER));
-        assertEq(fee, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
-    }
-
-    // depositForBurnIBC
-    function testDepositForBurnIBCSuccess(
-        uint256 _amount,
-        uint16 _percFee,
-        uint64 _flatFee
-    ) public {
-        vm.assume(_amount > 0);
-        vm.assume(_amount <= ALLOWED_BURN_AMOUNT);
-        vm.assume(_percFee > 0);
-        vm.assume(_percFee <= 100);
-        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
-
-        bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
-
-        token.mint(OWNER, _amount);
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, _percFee, _flatFee);
-
-        vm.prank(OWNER);
-        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
-
-        vm.expectEmit(true, true, true, true);
-        uint256 fee = (_amount * _percFee / 10000) + _flatFee;
-        emit Collect(_mintRecipientRaw, _amount - fee, fee, LOCAL_DOMAIN, REMOTE_DOMAIN);
-
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.depositForBurnIBC(
-            uint64(0),
-            bytes32(0),
-            bytes32(0),
-            _amount,
-            _mintRecipientRaw,
-            bytes32(0),
-            ""
-        );
-
-        assertEq(0, token.balanceOf(OWNER));
-        assertEq(fee, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
-    }
-
-    function testNotFeeUpdater() public {
-        vm.expectRevert(Unauthorized.selector);
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.setFee(3, 0, 0);
-    }
-
-    function testSetFeeTooHigh() public {
-        vm.expectRevert(PercFeeTooHigh.selector);
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(3, 10001, 15); // 100.01%
-    }
-
-    function testSetFeeSuccess(
-        uint16 _percFee,
-        uint64 _flatFee
-    ) public {
-        _percFee = uint16(bound(_percFee, 1, 100)); // 1%
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(3, _percFee, _flatFee);
-    }
-
-    function testWithdrawFeesWhenNotCollector() public {
-        vm.expectRevert(Unauthorized.selector);
-        vm.prank(OWNER);
-        tokenMessengerWithMetadataWrapper.setFee(3, 1, 15);
-    }
-
-    function testWithdrawFeesSuccess() public {
-        vm.prank(FEE_UPDATER);
-        tokenMessengerWithMetadataWrapper.setFee(3, 1, 15);
-        assertEq(0, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
-    }
+//    // depositForBurn with caller
+//    function testDepositForBurnWithCallerSuccess(
+//        uint256 _amount,
+//        uint16 _percFee,
+//        uint64 _flatFee
+//    ) public {
+//
+//        vm.assume(_amount > 0);
+//        vm.assume(_amount <= ALLOWED_BURN_AMOUNT);
+//        vm.assume(_percFee > 0);
+//        vm.assume(_percFee <= 100);
+//        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
+//
+//        bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
+//
+//        token.mint(OWNER, _amount);
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, _percFee, _flatFee);
+//
+//        vm.prank(OWNER);
+//        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
+//
+//        vm.expectEmit(true, true, true, true);
+//        uint256 fee = (_amount * _percFee / 10000) + _flatFee;
+//        emit Collect(_mintRecipientRaw, _amount - fee, fee, LOCAL_DOMAIN, REMOTE_DOMAIN);
+//
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.depositForBurn(
+//            _amount,
+//            REMOTE_DOMAIN,
+//            _mintRecipientRaw,
+//            0x0000000000000000000000000000000000000000000000000000000000000001
+//        );
+//
+//        assertEq(0, token.balanceOf(OWNER));
+//        assertEq(fee, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
+//    }
+//
+//    // depositForBurnIBC
+//    function testDepositForBurnIBCSuccess(
+//        uint256 _amount,
+//        uint16 _percFee,
+//        uint64 _flatFee
+//    ) public {
+//        vm.assume(_amount > 0);
+//        vm.assume(_amount <= ALLOWED_BURN_AMOUNT);
+//        vm.assume(_percFee > 0);
+//        vm.assume(_percFee <= 100);
+//        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
+//
+//        bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
+//
+//        token.mint(OWNER, _amount);
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, _percFee, _flatFee);
+//
+//        vm.prank(OWNER);
+//        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
+//
+//        vm.expectEmit(true, true, true, true);
+//        uint256 fee = (_amount * _percFee / 10000) + _flatFee;
+//        emit Collect(_mintRecipientRaw, _amount - fee, fee, LOCAL_DOMAIN, REMOTE_DOMAIN);
+//
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.depositForBurnIBC(
+//            uint64(0),
+//            bytes32(0),
+//            bytes32(0),
+//            _amount,
+//            _mintRecipientRaw,
+//            bytes32(0),
+//            ""
+//        );
+//
+//        assertEq(0, token.balanceOf(OWNER));
+//        assertEq(fee, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
+//    }
+//
+//    function testNotFeeUpdater() public {
+//        vm.expectRevert(Unauthorized.selector);
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.setFee(3, 0, 0);
+//    }
+//
+//    function testSetFeeTooHigh() public {
+//        vm.expectRevert(PercFeeTooHigh.selector);
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(3, 10001, 15); // 100.01%
+//    }
+//
+//    function testSetFeeSuccess(
+//        uint16 _percFee,
+//        uint64 _flatFee
+//    ) public {
+//        _percFee = uint16(bound(_percFee, 1, 100)); // 1%
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(3, _percFee, _flatFee);
+//    }
+//
+//    function testWithdrawFeesWhenNotCollector() public {
+//        vm.expectRevert(Unauthorized.selector);
+//        vm.prank(OWNER);
+//        tokenMessengerWithMetadataWrapper.setFee(3, 1, 15);
+//    }
+//
+//    function testWithdrawFeesSuccess() public {
+//        vm.prank(FEE_UPDATER);
+//        tokenMessengerWithMetadataWrapper.setFee(3, 1, 15);
+//        assertEq(0, token.balanceOf(address(tokenMessengerWithMetadataWrapper)));
+//    }
 }

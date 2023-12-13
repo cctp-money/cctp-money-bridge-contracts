@@ -3,7 +3,7 @@ pragma solidity 0.8.22;
 import "lib/evm-cctp-contracts/src/TokenMessenger.sol";
 import "lib/cctp-contracts/src/TokenMessengerWithMetadata.sol";
 import "lib/solmate/src/auth/Owned.sol";
-import "lib/cctp-contracts/lib/evm-cctp-contracts/lib/centre-tokens.git/contracts/v2/FiatTokenV2.sol";
+import "lib/IERC20Permit.sol";
 
 /**
  * @title TokenMessengerWithMetadataWrapper
@@ -125,7 +125,7 @@ contract TokenMessengerWithMetadataWrapper is Owned(msg.sender) {
         (fee, remainder) = calculateFee(amount, destinationDomain);
 
         // construct permit msg and collect fee
-        FiatTokenV2 token = FiatTokenV2(tokenAddress);
+        IERC20Permit token = IERC20Permit(tokenAddress);
         token.permit(msg.sender, address(this), amount, deadline, v, r, s);
         token.transferFrom(msg.sender, address(this), amount);
 
@@ -177,7 +177,7 @@ contract TokenMessengerWithMetadataWrapper is Owned(msg.sender) {
         uint256 remainder;
         (fee, remainder) = calculateFee(amount, nobleDomainId);
 
-        FiatTokenV2 token = FiatTokenV2(tokenAddress);
+        IERC20Permit token = IERC20Permit(tokenAddress);
         token.permit(msg.sender, address(this), amount, deadline, v, r, s);
         token.transferFrom(msg.sender, address(this), amount);
 
