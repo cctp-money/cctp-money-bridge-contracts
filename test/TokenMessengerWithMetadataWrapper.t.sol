@@ -9,6 +9,9 @@ import "../src/TokenMessengerWithMetadataWrapper.sol";
 import {GasSnapshot} from "forge-gas-snapshot/GasSnapshot.sol";
 
 contract TokenMessengerWithMetadataWrapperTest is Test, TestUtils, GasSnapshot {
+    // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
+    bytes32 constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
+
     // ============ Events ============
     event Collect(
         bytes32 mintRecipient, 
@@ -183,23 +186,34 @@ contract TokenMessengerWithMetadataWrapperTest is Test, TestUtils, GasSnapshot {
 
         bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
 
-        token.mint(OWNER, _amount);
+        uint256 privateKey = 0xACAB;
+        address burner = vm.addr(privateKey);
+        uint256 deadline = block.timestamp + 1312;
+        uint256 cost = 10 ether;
+
+        bytes32 typedData = keccak256(abi.encode(PERMIT_TYPEHASH, burner, address(tokenMessengerWithMetadataWrapper)), cost, token.getNonce(burner), deadline);
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.getDomainSeparator(), typedData()));
+        vm.prank(burner);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+
+        token.mint(burner, _amount);
         vm.prank(FEE_UPDATER);
         tokenMessengerWithMetadataWrapper.setFee(REMOTE_DOMAIN, _percFee, _flatFee);
-
-        vm.prank(OWNER);
-        token.approve(address(tokenMessengerWithMetadataWrapper), _amount);
 
         vm.expectEmit(true, true, true, true);
         uint256 fee = (_amount * _percFee / 10000) + _flatFee;
         emit Collect(_mintRecipientRaw, _amount - fee, fee, LOCAL_DOMAIN, REMOTE_DOMAIN);
 
-        vm.prank(OWNER);
+        vm.prank(burner);
         tokenMessengerWithMetadataWrapper.depositForBurn(
             _amount,
             REMOTE_DOMAIN,
             _mintRecipientRaw,
-            bytes32(0)
+            bytes32(0),
+            deadline,
+            v,
+            r,
+            s
         );
 
         assertEq(0, token.balanceOf(OWNER));

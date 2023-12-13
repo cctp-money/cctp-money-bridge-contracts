@@ -3,6 +3,7 @@ pragma solidity 0.8.22;
 import "lib/evm-cctp-contracts/src/TokenMessenger.sol";
 import "lib/cctp-contracts/src/TokenMessengerWithMetadata.sol";
 import "lib/solmate/src/auth/Owned.sol";
+import "lib/cctp-contracts/lib/evm-cctp-contracts/lib/centre-tokens.git/contracts/v2/FiatTokenV2.sol";
 
 /**
  * @title TokenMessengerWithMetadataWrapper
@@ -47,6 +48,10 @@ contract TokenMessengerWithMetadataWrapper is Owned(msg.sender) {
     address public feeUpdater;
     // USDC address for this domain
     address public immutable tokenAddress;
+    
+    // EIP 712 with salt
+    bytes32 internal constant EIP712_DOMAIN_TYPEHASH = keccak256(bytes("EIP712Domain(string name, string version, address verifyingContract, bytes32 salt)"));
+    bytes32 internal domainSeparator;
 
     struct Fee {
         // percentage fee in bips
@@ -108,14 +113,20 @@ contract TokenMessengerWithMetadataWrapper is Owned(msg.sender) {
         uint256 amount,
         uint32 destinationDomain,
         bytes32 mintRecipient,
-        bytes32 destinationCaller
+        bytes32 destinationCaller,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external {
         // collect fee
         uint256 fee;
         uint256 remainder;
         (fee, remainder) = calculateFee(amount, destinationDomain);
 
-        IERC20 token = IERC20(tokenAddress);
+        // construct permit msg and collect fee
+        FiatTokenV2 token = FiatTokenV2(tokenAddress);
+        token.permit(msg.sender, address(this), amount, deadline, v, r, s);
         token.transferFrom(msg.sender, address(this), amount);
 
         if (destinationCaller == bytes32(0)) {
@@ -155,14 +166,19 @@ contract TokenMessengerWithMetadataWrapper is Owned(msg.sender) {
         uint256 amount,
         bytes32 mintRecipient,
         bytes32 destinationCaller,
-        bytes calldata memo
+        bytes calldata memo,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external {
         // collect fee
         uint256 fee;
         uint256 remainder;
         (fee, remainder) = calculateFee(amount, nobleDomainId);
 
-        IERC20 token = IERC20(tokenAddress);
+        FiatTokenV2 token = FiatTokenV2(tokenAddress);
+        token.permit(msg.sender, address(this), amount, deadline, v, r, s);
         token.transferFrom(msg.sender, address(this), amount);
 
         if (destinationCaller == bytes32(0)) {
