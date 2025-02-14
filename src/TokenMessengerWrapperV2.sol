@@ -15,8 +15,7 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 contract TokenMessengerWrapperV2 is Owned(msg.sender) {
     // ============ Events ============
     event Collect(
-        bytes32 mintRecipient,
-        uint256 amountBurned, 
+        uint256 amountBurned,
         uint256 fee,
         uint32 source,
         uint32 dest
@@ -104,7 +103,7 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         uint32 minFinalityThreshold
     ) external {
         // collect fee
-        (uint256 fee, uint256 remainder) = calculateFee(minFinalityThreshold, amount, destinationDomain);
+        uint256 remainder = calculateFee(minFinalityThreshold, amount, destinationDomain);
         ERC20 token = ERC20(tokenAddress);
         token.transferFrom(msg.sender, address(this), amount);
 
@@ -114,11 +113,9 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
             mintRecipient,
             tokenAddress,
             destinationCaller,
-            remainder,
+            remainder-1,
             minFinalityThreshold
         );
-
-        emit Collect(mintRecipient, remainder, fee, currentDomainId, destinationDomain);
     }
 
     /**
@@ -144,7 +141,7 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         bytes32 s
     ) external {
         // collect fee
-        (uint256 fee, uint256 remainder) = calculateFee(minFinalityThreshold, amount, destinationDomain);
+        uint256 remainder = calculateFee(minFinalityThreshold, amount, destinationDomain);
         _transferAndPermit(amount, deadline, v, r, s);
 
         tokenMessengerV2.depositForBurn(
@@ -153,11 +150,9 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
             mintRecipient,
             tokenAddress,
             destinationCaller,
-            remainder,
+            remainder-1,
             minFinalityThreshold
         );
-
-        emit Collect(mintRecipient, remainder, fee, currentDomainId, destinationDomain);
     }
 
     /**
@@ -180,22 +175,18 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         bytes calldata hookData
     ) external {
         // collect fee
-        (uint256 fee, uint256 remainder) = calculateFee(minFinalityThreshold, amount, destinationDomain);
+        uint256 remainder = calculateFee(minFinalityThreshold, amount, destinationDomain);
         ERC20 token = ERC20(tokenAddress);
         token.transferFrom(msg.sender, address(this), amount);
 
-        tokenMessengerV2.depositForBurnWithHook(
+        _depositForBurnWithHook(
             remainder,
             destinationDomain,
             mintRecipient,
-            tokenAddress,
             destinationCaller,
-            remainder,
             minFinalityThreshold,
             hookData
         );
-
-        emit Collect(mintRecipient, remainder, fee, currentDomainId, destinationDomain);
     }
 
     /**
@@ -216,27 +207,44 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         bytes32 mintRecipient,
         bytes32 destinationCaller,
         uint32 minFinalityThreshold,
+        bytes calldata hookData,
         uint256 deadline,
         uint8 v,
         bytes32 r,
         bytes32 s
     ) external {
         // collect fee
-        (uint256 fee, uint256 remainder) = calculateFee(minFinalityThreshold, amount, destinationDomain);
+        uint256 remainder = calculateFee(minFinalityThreshold, amount, destinationDomain);
         _transferAndPermit(amount, deadline, v, r, s);
 
+        _depositForBurnWithHook(
+            remainder,
+            destinationDomain,
+            mintRecipient,
+            destinationCaller,
+            minFinalityThreshold,
+            hookData
+        );
+    }
+
+    function _depositForBurnWithHook(
+        uint256 remainder,
+        uint32 destinationDomain,
+        bytes32 mintRecipient,
+        bytes32 destinationCaller,
+        uint32 minFinalityThreshold,
+        bytes calldata hookData
+    ) internal {
         tokenMessengerV2.depositForBurnWithHook(
             remainder,
             destinationDomain,
             mintRecipient,
             tokenAddress,
             destinationCaller,
-            remainder,
+            remainder-1,
             minFinalityThreshold,
             hookData
         );
-
-        emit Collect(mintRecipient, remainder, fee, currentDomainId, destinationDomain);
     }
 
     function _transferAndPermit(
@@ -251,7 +259,7 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         token.transferFrom(msg.sender, address(this), amount);
     }
 
-    function calculateFee(uint32 finalityThreshold, uint256 amount, uint32 destinationDomain) private view returns (uint256, uint256) {
+    function calculateFee(uint32 finalityThreshold, uint256 amount, uint32 destinationDomain) private returns (uint256) {
 
         Fee memory entry = feeMap[keccak256(abi.encodePacked(destinationDomain, finalityThreshold))];
         if (!entry.isInitialized) {
@@ -262,20 +270,25 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
         if (amount <= fee) {
             revert BurnAmountTooLow();
         }
-        // fee, remainder
-        return (fee, amount-fee);
+
+        emit Collect(amount-fee, fee, currentDomainId, destinationDomain);
+
+        // remainder
+        return (amount-fee);
     }
 
     /**
      * Set fee for a given destination domain.
      */
     function setFee(uint32 finalityThreshold, uint32 destinationDomain, uint16 percFee, uint64 flatFee) external {
+
         if (msg.sender != feeUpdater) {
             revert Unauthorized();
         }
         if (percFee > 100) { // 1%
             revert PercFeeTooHigh();
         }
+
         feeMap[keccak256(abi.encodePacked(destinationDomain, finalityThreshold))] = Fee(percFee, flatFee, true);
     }
 
