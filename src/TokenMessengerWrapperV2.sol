@@ -9,7 +9,7 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
  * @notice A wrapper for a CCTP TokenMessenger contract that collects fees from USDC transfers.
  *
  * depositForBurn allows users to specify any destination domain.
- * depositForBurnWithHook allows arbitrary
+ * depositForBurnWithHook allows arbitrary data to be posted with the instruction
  * 
  */
 contract TokenMessengerWrapperV2 is Owned(msg.sender) {

@@ -12,7 +12,6 @@ import {MockERC20} from "./utils/MockERC20.sol";
 import {SigUtils} from "./utils/SigUtils.sol";
 import "evm-cctp-contracts/src/proxy/AdminUpgradableProxy.sol";
 
-
 contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
     // ============ Events ============
     event Collect(
