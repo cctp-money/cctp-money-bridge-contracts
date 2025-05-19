@@ -23,6 +23,7 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
 
     // ============ Errors ============
     error TokenMessengerNotSet();
+    error MessageTransmitterNotSet();
     error FeeNotFound();
     error BurnAmountTooLow();
     error Unauthorized();
@@ -41,7 +42,7 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
     address public constant FEE_UPDATER = address(0x3);
     address public constant TOKEN_ADDRESS = address(0x4);
 
-    uint32 public constant ALLOWED_BURN_AMOUNT = 42000000;
+    uint32 public constant ALLOWED_BURN_AMOUNT = 1000000000; // 1k
     MockERC20 public token;
     SigUtils public sigUtils;
 
@@ -102,6 +103,7 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
         vm.prank(OWNER);
         tokenMessengerWrapperV2 = new TokenMessengerWrapperV2(
             address(tokenMessengerV2),
+            address(messageTransmitterV2),
             LOCAL_DOMAIN,
             COLLECTOR,
             FEE_UPDATER,
@@ -123,7 +125,7 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
 
         vm.prank(tokenController);
 
-    tokenMinterV2.setMaxBurnAmountPerMessage(
+        tokenMinterV2.setMaxBurnAmountPerMessage(
             address(token), ALLOWED_BURN_AMOUNT
         );
     }
@@ -133,6 +135,20 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
         vm.expectRevert(TokenMessengerNotSet.selector);
 
         tokenMessengerWrapperV2 = new TokenMessengerWrapperV2(
+            address(0),
+            address(0),
+            LOCAL_DOMAIN,
+            COLLECTOR,
+            FEE_UPDATER,
+            TOKEN_ADDRESS
+        );
+    }
+
+    function testConstructor_rejectsZeroAddressMessageTransmitter() public {
+        vm.expectRevert(MessageTransmitterNotSet.selector);
+
+        tokenMessengerWrapperV2 = new TokenMessengerWrapperV2(
+            address(0x1),
             address(0),
             LOCAL_DOMAIN,
             COLLECTOR,
@@ -211,17 +227,17 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
 
         snapStart("depositForBurnSuccess");
 
-        vm.assume(_amount > 0);
-        vm.assume(_amount <= ALLOWED_BURN_AMOUNT);
-        vm.assume(_percFee > 0);
-        vm.assume(_percFee < 100);
-        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
+        _amount = bound(_amount, 2000000, ALLOWED_BURN_AMOUNT - 1);
+        _percFee = uint16(bound(_percFee, 0, 99));
+        _flatFee = uint64(bound(_flatFee, 0, 1000000));
+//        vm.assume(_flatFee + _percFee * _amount / 10000 < _amount);
+
 
         bytes32 _mintRecipientRaw = Message.addressToBytes32(address(0x10));
 
         token.mint(OWNER, _amount);
         vm.prank(FEE_UPDATER);
-        tokenMessengerWrapperV2.setFee(FINALITY_THRESHOLD_FINALIZED, REMOTE_DOMAIN, _percFee, _flatFee);
+        tokenMessengerWrapperV2.setFee(1000, REMOTE_DOMAIN, _percFee, _flatFee);
 
         vm.prank(OWNER);
         token.approve(address(tokenMessengerWrapperV2), _amount);
@@ -236,7 +252,7 @@ contract TokenMessengerWrapperV2Test is Test, TestUtils, GasSnapshot {
             REMOTE_DOMAIN,
             _mintRecipientRaw,
             bytes32(0),
-            FINALITY_THRESHOLD_FINALIZED
+            1000
         );
 
         assertEq(0, token.balanceOf(OWNER));

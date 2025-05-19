@@ -1,6 +1,7 @@
 pragma solidity 0.8.22;
 
 import "lib/evm-cctp-contracts/src/v2/TokenMessengerV2.sol";
+import "lib/evm-cctp-contracts/src/v2/MessageTransmitterV2.sol";
 import "lib/solmate/src/auth/Owned.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 
@@ -8,9 +9,10 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
  * @title TokenMessengerWrapperV2
  * @notice A wrapper for a CCTP TokenMessenger contract that collects fees from USDC transfers.
  *
- * depositForBurn allows users to specify any destination domain.
+ * depositForBurn allows users to specify any destination domain
  * depositForBurnWithHook allows arbitrary data to be posted with the instruction
- * 
+ * sendMessage allows arbitrary data to be sent to another chain
+ *
  */
 contract TokenMessengerWrapperV2 is Owned(msg.sender) {
     // ============ Events ============
@@ -23,6 +25,7 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
 
     // ============ Errors ============
     error TokenMessengerNotSet();
+    error MessageTransmitterNotSet();
     error FeeNotFound();
     error BurnAmountTooLow();
     error Unauthorized();
@@ -31,6 +34,8 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
     // ============ State Variables ============
     // Circle's V2 contract for burning tokens
     TokenMessengerV2 public immutable tokenMessengerV2;
+    // Circle's V2 contract for sending messages
+    MessageTransmitterV2 public immutable messageTransmitterV2;
     // the domain id this contract is deployed on
     uint32 public immutable currentDomainId;
     // address that can collect fees
@@ -65,6 +70,7 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
      */
     constructor(
         address _tokenMessengerV2,
+        address _messageTransmitterV2,
         uint32 _currentDomainId,
         address _collector,
         address _feeUpdater,
@@ -74,6 +80,11 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
             revert TokenMessengerNotSet();
         }
         tokenMessengerV2 = TokenMessengerV2(_tokenMessengerV2);
+
+        if (_messageTransmitterV2 == address(0)) {
+            revert MessageTransmitterNotSet();
+        }
+        messageTransmitterV2 = MessageTransmitterV2(_messageTransmitterV2);
 
         currentDomainId = _currentDomainId;
         collector = _collector;
@@ -224,6 +235,32 @@ contract TokenMessengerWrapperV2 is Owned(msg.sender) {
             destinationCaller,
             minFinalityThreshold,
             hookData
+        );
+    }
+
+    /**
+     * @notice Wrapper function for MessageTransmitterV2.sendMessage()
+     * Can specify any destination domain, including invalid ones.
+     *
+     * @param destinationDomain - domain id the funds will be minted on
+     * @param recipient - address receiving the message on the destination domain
+     * @param destinationCaller - the address which can call receiveMessage on the destination domain
+     * @param minFinalityThreshold - 1000 for confirmed (fast), 2000 for finalized (slow)
+     * @param messageBody - contents of the message
+     */
+    function sendMessage(
+        uint32 destinationDomain,
+        bytes32 recipient,
+        bytes32 destinationCaller,
+        uint32 minFinalityThreshold,
+        bytes calldata messageBody
+    ) external {
+        messageTransmitterV2.sendMessage(
+            destinationDomain,
+            recipient,
+            destinationCaller,
+            minFinalityThreshold,
+            messageBody
         );
     }
 

@@ -10,7 +10,15 @@ Test
 forge t --use 0.8.22 --evm-version paris --extra-output abi
 ```
 
-## Mainnet Deployments
+## How to deploy
+Testnet
+```
+
+```
+
+# V1 Deployments
+
+## Mainnet
 ```
 Ethereum
 0x598e338581e69BE32BCead94F1476FF301b8b0DF
@@ -32,7 +40,7 @@ Polygon
 
 ```
 
-## Testnet Deployments
+## Testnet
 ```
 Ethereum Goerli
 0x598e338581e69BE32BCead94F1476FF301b8b0DF

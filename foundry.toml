@@ -9,6 +9,6 @@ fs_permissions = [{ access = "read-write", path = ".forge-snapshots/"}]
 line_length = 80
 
 [fuzz]
-runs=1000
+runs=100000
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
