@@ -1,155 +1,186 @@
 pragma solidity 0.8.22;
 
-import "lib/evm-cctp-contracts/src/v2/TokenMessengerV2.sol";
-import "lib/evm-cctp-contracts/src/v2/MessageTransmitterV2.sol";
+import "evm-cctp-contracts/src/v2/TokenMessengerV2.sol";
+import "evm-cctp-contracts/src/v2/MessageTransmitterV2.sol";
+import "evm-cctp-contracts/src/messages/v2/MessageV2.sol";
+import "evm-cctp-contracts/src/messages/v2/BurnMessageV2.sol";
 import "lib/solmate/src/auth/Owned.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
-import {IPool} from "lib/aave-v3-core/contracts/protocol/pool/IPool.sol";
+import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
+import {ERC20 as SolmateERC20} from "solmate/tokens/ERC20.sol";
+import "aave-v3-core/contracts/protocol/pool/Pool.sol";
+import "solmate/utils/ReentrancyGuard.sol";
+using SafeTransferLib for SolmateERC20;
+import {TypedMemView} from "evm-cctp-contracts/lib/memview-sol/contracts/TypedMemView.sol";
+using TypedMemView for bytes;
+using TypedMemView for bytes29;
 
 /**
  * @title AaveV3Deposit
- * @notice A contract called after a DepositForBurnWithHook on the destination chain.
+ * @notice An immutable contract called after a DepositForBurnWithHook on the destination chain.
  * Mints USDC to this address, calls function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
  * On failure to deposit, send to address specified in the payload.
  *
- * This contract is immutable
  */
 
-// TODO, should the depositForBurn wrapper specify fields? A: yes
-contract AaveV3Supply is Owned(msg.sender) {
-    // ============ Events ============
-    event Route( // TODO
-        uint256 amount,
-        uint32 sourceDomain,
-        address finalRecipient
-    );
+// TODO should we charge a small amount for gas?
 
-    event DepositFailure(uint32 test);
+contract AaveV3Supply is Owned, ReentrancyGuard {
+    // ============ Events ============
+//    event Route( // TODO
+//        uint256 amount,
+//        uint32 sourceDomain,
+//        address finalRecipient
+//    );
+
+    event DepositSuccess();
+    event DepositFailure();
 
     // ============ Errors ============
+    error CallerNotRelayer();
     error AddressNotSet();
-    
+    error MintFailure();
+    error InvalidCctpVersion();
+    error InvalidDomain();
+    error NotUSDC();
+    error InvalidHook();
+
+
     // ============ State Variables ============
-    // Circle's V2 contract for sending messages
     MessageTransmitterV2 public immutable messageTransmitterV2;
-    // AaveV3 USDC pool address
-    address public immutable aavePool;
-    // the domain id this contract is deployed on
+    Pool public immutable aavePool;
     uint32 public immutable currentDomainId;
-    // address that can collect fees
-    address public collector;
-    // address that can update fees TODO?
-    address public feeUpdater;
-    // USDC address for this domain
     address public immutable usdcAddress;
+    address public immutable relayer; // allowed caller
+
+    // ============ Modifiers ==============
+    modifier onlyRelayer() {
+        if (msg.sender != relayer) revert CallerNotRelayer();
+        _;
+    }
+
 
     // ============ Constructor ============
     /**
      * @param _currentDomainId the domain id this contract is deployed on
-     * @param _collector address that can collect fees
-     * @param _feeUpdater address that can update fees
-     * @param _usdcAddress USDC erc20 token address for this domain
+     * @param _aavePool AaveV3 pool for USDC on this domain
+     * @param _currentDomainId CCTP domain ID
+     * @param _usdcAddress erc20 token address for this domain
+     * @param _relayer USDC address that can call this contract
      */
     constructor(
         address _messageTransmitterV2,
-        address _aaveSupplyAddress,
+        address _aavePool,
         uint32 _currentDomainId,
-        address _collector,
-        address _feeUpdater,
-        address _usdcAddress
-    ) {
-        if (_messageTransmitterV2 == address(0)) {
-            revert AddressNotSet();
-        }
+        address _usdcAddress,
+        address _relayer
+    ) Owned(msg.sender) {
+        if (
+            _messageTransmitterV2 == address(0) ||
+            _aavePool    == address(0) ||
+            _usdcAddress == address(0) ||
+            _relayer     == address(0)
+        ) revert AddressNotSet();
+
         messageTransmitterV2 = MessageTransmitterV2(_messageTransmitterV2);
-
-        if(_aaveSupplyAddress == address(0)) {
-            revert AddressNotSet();
-        }
-        aaveSupply = P
-
-
-
+        aavePool = Pool(_aavePool);
         currentDomainId = _currentDomainId;
-        collector = _collector;
-        feeUpdater = _feeUpdater;
         usdcAddress = _usdcAddress;
-
-        ERC20 token = ERC20(usdcAddress);
-        token.approve(_tokenMessengerV2, type(uint256).max);
+        relayer = _relayer;
     }
 
     // ============ External Functions ============
     /**
      * @notice Wrapper function for MessageTransmitter.receiveMessage()
      *
-     * @param amount - the burn amount
-     * @param destinationDomain - domain id the funds will be minted on
-     * @param mintRecipient - address receiving minted tokens on destination domain
-     * @param destinationCaller - the address which can call receiveMessage on the destination domain
-     * @param minFinalityThreshold - 1000 for confirmed (fast), 2000 for finalized (slow)
+     * Note: if the hook message is invalid, we have no way of minting to the
+     * recipient, so we will not proceed with the mint.
+     *
+     * @param message - CCTP V2 Message
+     * @param attestation - attestation from Circle
      */
     function receiveMessage(
         bytes calldata message,
         bytes calldata attestation
-    ) external {
-        bool success = messageTransmitterV2.receiveMessage(message, attestation);
-        if(!success) {
-            // TODO exit
-        }
-        // tokens are transferred to this address
+    ) external nonReentrant {
 
-        // process hook
-        bytes29 memory msg = _message.ref(0);
-        uint32 cctpVersion = msg.slice(0, 4, 0);
-        if(cctpVersion != 1) {
-            // TODO fail
-        }
-        bytes memory msgBody = msg.slice(
-            148, // MESSAGE_BODY_INDEX for CCTP v2
-            _message.len() - 148,
-            0
-        );
-        bytes32 memory burnToken = msgBody.slice(4, 36, 0);
-        if(burnToken != usdcAddress) {
-            // TODO
-        }
-        uint256 remainingTokens = msgBody.slice(68, 100, 0) - msgBody.slice(164, 196, 0);
-        if(remainingTokens < 1000000) {
-            // TODO add threshold.  think about minimum deposit size
-        }
-        bytes memory hookData = msgBody.slice(228, msgBody.len(), 0);
-        // offset | data
-        // 0      | finalMintRecipient address
-        // TODO validate payload
+        // TODO check relayer
 
-        address finalMintRecipient = hookData.slice(0, 32, 0);
+        // 1. Parse and validate message/burn message/hook before mint
+        bytes29 view_ = message.ref(0);
+        MessageV2._validateMessageFormat(view_);
+        if(MessageV2._getVersion(view_) != 1) { // V1 = "0", V2 = "1"
+            revert InvalidCctpVersion();
+        }
+        if(MessageV2._getDestinationDomain(view_) != currentDomainId) {
+            revert InvalidDomain();
+        }
 
-        // TODO maybe use supply with permit to avoid approve?
+        // validate burn message, version, burn token
+        bytes29 msgBody = MessageV2._getMessageBody(view_);
+        BurnMessageV2._validateBurnMessageFormat(msgBody);
+        if(BurnMessageV2._getVersion(msgBody) != 1) {
+            revert InvalidCctpVersion();
+        }
+        bytes32 burnToken = BurnMessageV2._getBurnToken(msgBody);
+        if (address(uint160(uint256(burnToken))) != usdcAddress) {
+            revert NotUSDC();
+        }
+
+        uint256 remainingTokens = BurnMessageV2._getAmount(msgBody) - BurnMessageV2._getFeeExecuted(msgBody);
+        if(remainingTokens < 1_000_000) {
+            // TODO add threshold.  think about minimum deposit size.
+            // TODO should we collect a fee for gas (at 1.7 gwei, $1.40 for mainnet?
+        }
+
+        // validate hook data format
+        address finalMintRecipient = _decodeHookRecipient(msgBody); // reverts on bad hook
+
+        // 2. Mint USDC into this contract
+        if(!messageTransmitterV2.receiveMessage(message, attestation)) {
+            revert MintFailure();
+        }
+
+        // 3. Try to supply to Aave
+        // TODO use supply with permit to avoid approve?
         // https://aave.com/docs/developers/smart-contracts/pool#write-methods-supplywithpermit
-        ERC20 token = ERC20(usdcAddress);
-        token.approve(aaveSupplyAddress, remainingTokens);
-        aaveSupplyAddress.supply(burnToken, remainingTokens, finalMintRecipient, 0);
 
+        SolmateERC20 token = SolmateERC20(usdcAddress);
+        token.safeApprove(address(aavePool), remainingTokens); // TODO just set to 0
 
-    }
-
-
-    function updateOwner(address newOwner) external onlyOwner {
-        owner = newOwner;
-    }
-
-    function updateCollector(address newCollector) external onlyOwner {
-        collector = newCollector;
-    }
-
-
-    function withdrawFees() external {
-        if (msg.sender != collector) {
-            revert Unauthorized();
+        try aavePool.supply(usdcAddress, remainingTokens, finalMintRecipient, 0) {
+            token.safeApprove(address(aavePool), 0);
+            emit DepositSuccess();
+        } catch {
+            token.safeApprove(address(aavePool), 0);
+            token.safeTransfer(finalMintRecipient, remainingTokens);
+            emit DepositFailure();
         }
-        uint256 balance = ERC20(usdcAddress).balanceOf(address(this));
-        ERC20 token = ERC20(usdcAddress);
-        token.transfer(collector, balance);
     }
+
+    // admin sweep in case funds are stuck
+    function sweep(address token, address to) external onlyOwner {
+        uint256 bal = SolmateERC20(token).balanceOf(address(this));
+        if (token == usdcAddress && bal > 0) revert(); // USDC invariant
+        SolmateERC20(token).safeTransfer(to, bal);
+    }
+
+    // offset | data
+    // 0      | finalMintRecipient bytes32 (12 0's + 20 byte address)
+    function _decodeHookRecipient(bytes29 body) internal pure returns (address rec) {
+        bytes29 hook = BurnMessageV2._getHookData(body);
+
+        if (hook.length != 32) revert InvalidHook();
+
+        // Check top 96 bits are zero (i.e. left-padded zeros)
+        uint256 rawValue = hook.indexUint(0, 32);
+        if (rawValue >> 160 != 0) revert InvalidHook();
+
+        // Decode address from the lower 20 bytes
+        rec = abi.decode(hook.clone(), (address));
+        if (rec == address(0)) revert InvalidHook();
+    }
+
 }
+// use circle's libs for getMintRecipientAmount
+// checksum guard eip 55 in client/relayer
+//
