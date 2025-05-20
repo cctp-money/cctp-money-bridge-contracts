@@ -166,7 +166,7 @@ contract AaveV3Supply is Owned, ReentrancyGuard {
 
     // offset | data
     // 0      | finalMintRecipient bytes32 (12 0's + 20 byte address)
-    function _decodeHookRecipient(bytes29 body) internal pure returns (address rec) {
+    function _decodeHookRecipient(bytes29 body) internal view returns (address rec) {
         bytes29 hook = BurnMessageV2._getHookData(body);
 
         if (hook.length != 32) revert InvalidHook();
